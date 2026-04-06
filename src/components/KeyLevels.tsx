@@ -108,12 +108,13 @@ interface Props {
 }
 
 export default function KeyLevels({ summary, priceLabel = "" }: Props) {
-  const { netGex, netDex, gammaFlip, callWall, putWall } = summary;
+  const { netGex, netDex, netVex, gammaFlip, callWall, putWall } = summary;
   const [showNetGex, setShowNetGex] = useState(true);
   const [showNetDex, setShowNetDex] = useState(true);
+  const [showNetVex, setShowNetVex] = useState(true);
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
       <Card
         label="Net GEX"
         value={`$${formatExposure(netGex)}`}
@@ -131,6 +132,15 @@ export default function KeyLevels({ summary, priceLabel = "" }: Props) {
         toggleable
         visible={showNetDex}
         onToggle={() => setShowNetDex((v) => !v)}
+      />
+      <Card
+        label="Net VEX"
+        value={`$${formatExposure(netVex)}`}
+        sub={netVex >= 0 ? "Buy pressure on vol↑" : "Sell pressure on vol↑"}
+        sentiment={netVex >= 0 ? "positive" : "negative"}
+        toggleable
+        visible={showNetVex}
+        onToggle={() => setShowNetVex((v) => !v)}
       />
       <Card
         label="Gamma Flip"

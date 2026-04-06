@@ -116,6 +116,63 @@ export function accumulateStrikes(
 }
 
 /**
+ * Find the GEX-weighted centroid of the dominant concentration cluster.
+ *
+ * Instead of argmax (which jumps whenever one strike fluctuates), we:
+ *   1. Find the peak value.
+ *   2. Keep all strikes whose GEX is within `clusterThreshold` of the peak.
+ *   3. Return the GEX-weighted average strike of that cluster, snapped to
+ *      the nearest actual listed strike.
+ *
+ * This is stable: small per-strike fluctuations barely move the centroid,
+ * and the level only migrates when the overall distribution shifts.
+ */
+function clusterWall(
+  strikes: StrikeData[],
+  side: "call" | "put",
+  clusterThreshold = 0.30   // include strikes with GEX ≥ 30% of peak
+): number {
+  if (!strikes.length) return 0;
+
+  const vals = strikes.map((s) => (side === "call" ? s.callGex : s.putGex));
+  const peak  = side === "call" ? Math.max(...vals) : Math.min(...vals);
+
+  // No meaningful wall (all values ≤ 0 for calls, ≥ 0 for puts)
+  if (side === "call" && peak <= 0) return 0;
+  if (side === "put"  && peak >= 0) return 0;
+
+  const threshold = side === "call"
+    ? peak * clusterThreshold
+    : peak * clusterThreshold;   // peak is negative, so multiplying preserves sign
+
+  const cluster = strikes.filter((s) =>
+    side === "call" ? s.callGex >= threshold : s.putGex <= threshold
+  );
+
+  if (!cluster.length) {
+    // Fallback: just return the argmax/argmin strike
+    const best = strikes.reduce((a, b) =>
+      side === "call"
+        ? (b.callGex > a.callGex ? b : a)
+        : (b.putGex < a.putGex  ? b : a)
+    );
+    return best.strike;
+  }
+
+  // GEX-magnitude weighted centroid
+  const totalWeight = cluster.reduce((sum, s) =>
+    sum + Math.abs(side === "call" ? s.callGex : s.putGex), 0);
+  const centroid = cluster.reduce((sum, s) =>
+    sum + s.strike * Math.abs(side === "call" ? s.callGex : s.putGex), 0) / totalWeight;
+
+  // Snap centroid to the nearest actual listed strike
+  return strikes.reduce((best, s) =>
+    Math.abs(s.strike - centroid) < Math.abs(best - centroid) ? s.strike : best,
+    strikes[0].strike
+  );
+}
+
+/**
  * Compute summary metrics from the aggregated strike map.
  */
 export function computeSummary(
@@ -126,29 +183,21 @@ export function computeSummary(
 
   let netGex = 0;
   let netDex = 0;
-  let callWall = 0;
-  let putWall = 0;
-  let maxCallGex = -Infinity;
-  let minPutGex = Infinity;
+  let netVex = 0;
 
   for (const s of strikes) {
     netGex += s.netGex;
     netDex += s.netDex;
-
-    if (s.callGex > maxCallGex) {
-      maxCallGex = s.callGex;
-      callWall = s.strike;
-    }
-    if (s.putGex < minPutGex) {
-      minPutGex = s.putGex;
-      putWall = s.strike;
-    }
+    netVex += s.netVex;
   }
 
-  // Gamma flip: find where cumulative GEX crosses zero
+  // Stable cluster-centroid walls (don't jump on small fluctuations)
+  const callWall = clusterWall(strikes, "call");
+  const putWall  = clusterWall(strikes, "put");
+
   const gammaFlip = findGammaFlip(strikes, spot);
 
-  return { netGex, netDex, gammaFlip, callWall, putWall };
+  return { netGex, netDex, netVex, gammaFlip, callWall, putWall };
 }
 
 /**

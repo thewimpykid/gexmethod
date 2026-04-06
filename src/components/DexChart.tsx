@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ComposedChart,
   Bar,
@@ -16,7 +16,7 @@ import {
 } from "recharts";
 import type { StrikeData, GexSummary } from "@/lib/types";
 
-// ─── Palette ────────────────────────────────────────────────────────────────
+// ─── Palette ─────────────────────────────────────────────────────────────────
 const POS    = "#1de9b6";
 const NEG    = "#f87171";
 const C_SPOT = "#eab308";
@@ -24,13 +24,13 @@ const C_CW   = "#ef4444";
 const C_PW   = "#22c55e";
 const C_FLIP = "#818cf8";
 const C_NET  = "#60a5fa";
-// ────────────────────────────────────────────────────────────────────────────
 
 function fmt(value: number): string {
   const abs = Math.abs(value);
-  if (abs >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `${(value / 1e6).toFixed(0)}M`;
-  if (abs >= 1e3) return `${(value / 1e3).toFixed(0)}K`;
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(0)}M`;
+  if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(0)}K`;
   return value.toFixed(0);
 }
 
@@ -54,63 +54,71 @@ function CustomTooltip({ active, payload, label, isNq }: {
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-3 text-xs font-mono space-y-0.5 shadow-xl">
-      <p className="text-[#e6edf3] font-bold mb-1">Strike {fmtPrice(Number(label), !!isNq)}</p>
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-3 text-xs font-mono space-y-1 shadow-xl">
+      <p className="text-[#e6edf3] font-bold mb-1.5">Strike {fmtPrice(Number(label), !!isNq)}</p>
       {payload.map((p) => (
-        <p key={p.name} style={{ color: p.color }}>
-          {p.name}: {fmt(p.value)}
-        </p>
+        <p key={p.name} style={{ color: p.color }}>{p.name}: {fmt(p.value)}</p>
       ))}
     </div>
   );
 }
 
-// ─── Legend helpers ──────────────────────────────────────────────────────────
-function LegendBar({ color, label }: { color: string; label: string }) {
+// ─── Breakdown panel ─────────────────────────────────────────────────────────
+function BreakdownBar({
+  totalCall, totalPut, net, formula,
+}: {
+  totalCall: number; totalPut: number; net: number; formula: string;
+}) {
+  const absCall = Math.abs(totalCall);
+  const absPut  = Math.abs(totalPut);
+  const absNet  = Math.abs(net);
+  const maxBar  = Math.max(absCall, absPut, absNet, 1);
+
+  function Bar({ value, color, label }: { value: number; color: string; label: string }) {
+    const pct = Math.min((Math.abs(value) / maxBar) * 100, 100);
+    return (
+      <div className="flex items-center gap-3">
+        <span className="text-[10px] font-mono text-[#8b949e] w-16 text-right flex-shrink-0">{label}</span>
+        <div className="flex-1 h-4 bg-[#21262d] rounded-sm overflow-hidden">
+          <div
+            className="h-full rounded-sm transition-all"
+            style={{ width: `${pct}%`, backgroundColor: color, opacity: 0.85 }}
+          />
+        </div>
+        <span className="text-[10px] font-mono w-20 flex-shrink-0" style={{ color }}>{fmt(value)}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-1">
-      <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: color }} />
-      <span className="text-[10px] text-[#8b949e] whitespace-nowrap">{label}</span>
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg px-4 py-3 mb-3 space-y-2">
+      <p className="text-[10px] font-semibold text-[#8b949e] uppercase tracking-wider mb-2">How Net is Calculated</p>
+      <Bar value={totalCall} color={POS} label="Call total" />
+      <Bar value={totalPut}  color={NEG} label="Put total" />
+      <div className="flex items-center gap-3 pt-1 border-t border-[#30363d]">
+        <span className="text-[10px] font-mono text-[#8b949e] w-16 text-right flex-shrink-0">Net</span>
+        <div className="flex-1 h-4 bg-[#21262d] rounded-sm overflow-hidden">
+          <div
+            className="h-full rounded-sm"
+            style={{
+              width: `${Math.min((absNet / maxBar) * 100, 100)}%`,
+              backgroundColor: net >= 0 ? POS : NEG,
+            }}
+          />
+        </div>
+        <span
+          className="text-[10px] font-mono font-bold w-20 flex-shrink-0"
+          style={{ color: net >= 0 ? POS : NEG }}
+        >
+          {fmt(net)}
+        </span>
+      </div>
+      <p className="text-[9px] font-mono text-[#484f58] pt-1">{formula}</p>
     </div>
   );
 }
 
-function LegendDash({ color, label }: { color: string; label: string }) {
-  return (
-    <div className="flex items-center gap-1">
-      <svg width="20" height="6" className="flex-shrink-0">
-        <line x1="0" y1="3" x2="20" y2="3" stroke={color} strokeWidth="1.5" strokeDasharray="4 2" />
-      </svg>
-      <span className="text-[10px] text-[#8b949e] whitespace-nowrap">{label}</span>
-    </div>
-  );
-}
-
-function LegendRange() {
-  return (
-    <div className="flex items-center gap-1">
-      <div
-        className="w-3 h-3 rounded-sm flex-shrink-0"
-        style={{ backgroundColor: `${C_NET}22`, border: `1px solid ${C_NET}55` }}
-      />
-      <span className="text-[10px] text-[#8b949e] whitespace-nowrap">Range</span>
-    </div>
-  );
-}
-
-function BottomLegendItem({ color, label, sub }: { color: string; label: string; sub: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-      <span className="text-[10px] text-[#8b949e]">
-        {label}{" "}
-        <span className="text-[#484f58]">{sub}</span>
-      </span>
-    </div>
-  );
-}
-
-// ─── Props ────────────────────────────────────────────────────────────────────
+// ─── Props ───────────────────────────────────────────────────────────────────
 interface Props {
   strikes: StrikeData[];
   summary: GexSummary;
@@ -118,43 +126,71 @@ interface Props {
   priceLabel?: string;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
 export default function DexChart({ strikes, summary, spot, priceLabel = "" }: Props) {
   const [mode, setMode] = useState<"net" | "callput">("net");
   const isNq = priceLabel === "NQ";
-  const symbol = priceLabel || "—";
 
-  const xSpot = nearestTo(strikes, spot);
-  const xFlip = summary.gammaFlip != null ? nearestTo(strikes, summary.gammaFlip) : null;
-  const xCW   = summary.callWall || null;
-  const xPW   = summary.putWall  || null;
+  // ── Filter to ±7% of spot for readability ────────────────────────────────
+  const data = useMemo(() => {
+    const range = spot * 0.07;
+    return strikes.filter((s) => s.strike >= spot - range && s.strike <= spot + range);
+  }, [strikes, spot]);
+
+  const xSpot = useMemo(() => nearestTo(data, spot), [data, spot]);
+  const xFlip = useMemo(() => summary.gammaFlip != null ? nearestTo(data, summary.gammaFlip) : null, [data, summary.gammaFlip]);
+  const xCW   = data.some((s) => s.strike === summary.callWall) ? summary.callWall : null;
+  const xPW   = data.some((s) => s.strike === summary.putWall)  ? summary.putWall  : null;
+
+  const totalCallDex = useMemo(() => strikes.reduce((s, r) => s + r.callDex, 0), [strikes]);
+  const totalPutDex  = useMemo(() => strikes.reduce((s, r) => s + r.putDex,  0), [strikes]);
+  const netDexTotal  = summary.netDex;
+  const netPositive  = netDexTotal >= 0;
+
+  const tickInterval = data.length > 30 ? 4 : data.length > 20 ? 2 : 1;
 
   return (
-    <div className="bg-[#0d1117] border border-[#30363d] rounded-xl p-4">
-      {/* ── Header row ─────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between mb-2 gap-2">
-        <p className="text-[11px] font-semibold text-[#8b949e] uppercase tracking-wider">
-          DEX BY STRIKE{" "}
-          <span className="text-[#e6edf3]">· {symbol}</span>
-        </p>
+    <div className="bg-[#0d1117] border border-[#30363d] rounded-xl p-5">
 
-        <div className="flex items-center bg-[#161b22] rounded-md p-0.5 border border-[#30363d]">
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <p className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider mb-1">
+            Delta Exposure Profile · <span className="text-[#e6edf3]">{priceLabel || "—"}</span>
+          </p>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[11px] text-[#8b949e] font-mono">Net DEX</span>
+            <span
+              className="text-xl font-bold font-mono"
+              style={{ color: netPositive ? POS : NEG }}
+            >
+              {fmt(netDexTotal)}
+            </span>
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                netPositive
+                  ? "bg-[#1de9b6]/10 text-[#1de9b6]"
+                  : "bg-[#f87171]/10 text-[#f87171]"
+              }`}
+            >
+              {netPositive ? "+ DELTA" : "− DELTA"}
+            </span>
+          </div>
+        </div>
+
+        {/* Toggle */}
+        <div className="flex items-center bg-[#161b22] rounded-lg p-0.5 border border-[#30363d] flex-shrink-0">
           <button
             onClick={() => setMode("net")}
-            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              mode === "net"
-                ? "bg-white text-[#0d1117]"
-                : "text-[#8b949e] hover:text-[#e6edf3]"
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+              mode === "net" ? "bg-white text-[#0d1117]" : "text-[#8b949e] hover:text-[#e6edf3]"
             }`}
           >
             Net DEX
           </button>
           <button
             onClick={() => setMode("callput")}
-            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              mode === "callput"
-                ? "bg-white text-[#0d1117]"
-                : "text-[#8b949e] hover:text-[#e6edf3]"
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+              mode === "callput" ? "bg-white text-[#0d1117]" : "text-[#8b949e] hover:text-[#e6edf3]"
             }`}
           >
             Call vs Put
@@ -162,179 +198,106 @@ export default function DexChart({ strikes, summary, spot, priceLabel = "" }: Pr
         </div>
       </div>
 
-      {/* ── Top-right legend ──────────────────────────────────────────── */}
-      <div className="flex items-center justify-end flex-wrap gap-x-3 gap-y-1 mb-1">
-        {mode === "net" ? (
-          <>
-            <LegendBar color={POS} label="Positive" />
-            <LegendBar color={NEG} label="Negative" />
-          </>
-        ) : (
-          <>
-            <LegendBar color={POS} label="Call DEX" />
-            <LegendBar color={NEG} label="Put DEX" />
-          </>
+      {/* ── Breakdown ────────────────────────────────────────────────────── */}
+      <BreakdownBar
+        totalCall={totalCallDex}
+        totalPut={totalPutDex}
+        net={netDexTotal}
+        formula="DEX = δ × OI × multiplier × spot  |  Net DEX = Σ(Call DEX) + Σ(Put DEX)"
+      />
+
+      {/* ── Key level pills ──────────────────────────────────────────────── */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {summary.callWall > 0 && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#ef4444]/10 border border-[#ef4444]/25">
+            <div className="w-1.5 h-1.5 rounded-full bg-[#ef4444]" />
+            <span className="text-[10px] font-mono text-[#ef4444]">Call Wall {fmtPrice(summary.callWall, isNq)}</span>
+          </div>
         )}
-        <LegendDash color={C_SPOT} label="Spot" />
-        <LegendDash color={C_CW}   label="CW" />
-        <LegendDash color={C_PW}   label="PW" />
-        <LegendDash color={C_FLIP} label="Flip" />
-        <LegendRange />
+        {summary.putWall > 0 && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#22c55e]/10 border border-[#22c55e]/25">
+            <div className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />
+            <span className="text-[10px] font-mono text-[#22c55e]">Put Wall {fmtPrice(summary.putWall, isNq)}</span>
+          </div>
+        )}
+        {summary.gammaFlip != null && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#818cf8]/10 border border-[#818cf8]/25">
+            <div className="w-1.5 h-1.5 rounded-full bg-[#818cf8]" />
+            <span className="text-[10px] font-mono text-[#818cf8]">Flip {fmtPrice(Math.round(summary.gammaFlip), isNq)}</span>
+          </div>
+        )}
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#eab308]/10 border border-[#eab308]/25">
+          <div className="w-1.5 h-1.5 rounded-full bg-[#eab308]" />
+          <span className="text-[10px] font-mono text-[#eab308]">Spot {fmtPrice(spot, isNq)}</span>
+        </div>
+        {mode === "callput" && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#60a5fa]/10 border border-[#60a5fa]/25">
+            <span className="text-[10px] font-mono text-[#60a5fa]">— Net line</span>
+          </div>
+        )}
       </div>
 
-      {/* ── Chart ─────────────────────────────────────────────────────── */}
-      <ResponsiveContainer width="100%" height={340}>
-        <ComposedChart data={strikes} margin={{ top: 20, right: 8, left: 8, bottom: 44 }}>
+      {/* ── Chart ───────────────────────────────────────────────────────── */}
+      <ResponsiveContainer width="100%" height={400}>
+        <ComposedChart data={data} margin={{ top: 16, right: 16, left: 8, bottom: 56 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#21262d" vertical={false} />
 
           <XAxis
             dataKey="strike"
-            tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "monospace" }}
+            tick={{ fill: "#8b949e", fontSize: 11, fontFamily: "monospace" }}
             tickFormatter={(v) => fmtPrice(v, isNq)}
-            angle={-45}
+            angle={-40}
             textAnchor="end"
-            interval="preserveStartEnd"
+            interval={tickInterval}
             stroke="#30363d"
+            tickMargin={6}
           />
           <YAxis
-            tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "monospace" }}
+            tick={{ fill: "#8b949e", fontSize: 11, fontFamily: "monospace" }}
             tickFormatter={fmt}
             stroke="#30363d"
-            width={52}
+            width={60}
           />
 
-          <Tooltip content={<CustomTooltip isNq={isNq} />} />
+          <Tooltip content={<CustomTooltip isNq={isNq} />} cursor={{ fill: "#ffffff08" }} />
+          <ReferenceLine y={0} stroke="#484f58" strokeWidth={1.5} />
 
-          <ReferenceLine y={0} stroke="#30363d" strokeWidth={1} />
-
-          {/* Range shading */}
           {xPW && xCW && (
             <ReferenceArea
               x1={Math.min(xPW, xCW)}
               x2={Math.max(xPW, xCW)}
               fill={C_NET}
-              fillOpacity={0.05}
+              fillOpacity={0.06}
               strokeOpacity={0}
             />
           )}
 
-          {/* Spot */}
-          {xSpot && (
-            <ReferenceLine
-              x={xSpot}
-              stroke={C_SPOT}
-              strokeDasharray="4 2"
-              strokeWidth={1.5}
-              label={{
-                value: fmtPrice(spot, isNq),
-                fill: C_SPOT,
-                fontSize: 10,
-                fontFamily: "monospace",
-                position: "insideTop",
-                offset: 4,
-              }}
-            />
-          )}
+          {xSpot && <ReferenceLine x={xSpot} stroke={C_SPOT} strokeDasharray="5 3" strokeWidth={2}
+            label={{ value: fmtPrice(spot, isNq), fill: C_SPOT, fontSize: 11, fontFamily: "monospace", position: "insideTopLeft", offset: 6 }} />}
+          {xCW && <ReferenceLine x={xCW} stroke={C_CW} strokeDasharray="5 3" strokeWidth={1.5}
+            label={{ value: `CW ${fmtPrice(summary.callWall, isNq)}`, fill: C_CW, fontSize: 10, fontFamily: "monospace", position: "insideTopRight", offset: 6 }} />}
+          {xPW && <ReferenceLine x={xPW} stroke={C_PW} strokeDasharray="5 3" strokeWidth={1.5}
+            label={{ value: `PW ${fmtPrice(summary.putWall, isNq)}`, fill: C_PW, fontSize: 10, fontFamily: "monospace", position: "insideTopLeft", offset: 6 }} />}
+          {xFlip && <ReferenceLine x={xFlip} stroke={C_FLIP} strokeDasharray="5 3" strokeWidth={1.5}
+            label={{ value: `Flip ${fmtPrice(Math.round(summary.gammaFlip ?? 0), isNq)}`, fill: C_FLIP, fontSize: 10, fontFamily: "monospace", position: "insideBottomRight", offset: 6 }} />}
 
-          {/* Call Wall */}
-          {xCW && (
-            <ReferenceLine
-              x={xCW}
-              stroke={C_CW}
-              strokeDasharray="4 2"
-              strokeWidth={1.5}
-              label={{
-                value: fmtPrice(summary.callWall, isNq),
-                fill: C_CW,
-                fontSize: 10,
-                fontFamily: "monospace",
-                position: "insideTop",
-                offset: 4,
-              }}
-            />
-          )}
-
-          {/* Put Wall */}
-          {xPW && (
-            <ReferenceLine
-              x={xPW}
-              stroke={C_PW}
-              strokeDasharray="4 2"
-              strokeWidth={1.5}
-              label={{
-                value: fmtPrice(summary.putWall, isNq),
-                fill: C_PW,
-                fontSize: 10,
-                fontFamily: "monospace",
-                position: "insideTop",
-                offset: 4,
-              }}
-            />
-          )}
-
-          {/* Gamma Flip */}
-          {xFlip && (
-            <ReferenceLine
-              x={xFlip}
-              stroke={C_FLIP}
-              strokeDasharray="4 2"
-              strokeWidth={1.5}
-              label={{
-                value: fmtPrice(summary.gammaFlip ?? 0, isNq),
-                fill: C_FLIP,
-                fontSize: 10,
-                fontFamily: "monospace",
-                position: "insideBottom",
-                offset: 4,
-              }}
-            />
-          )}
-
-          {/* ── Bars ──────────────────────────────────────────────────── */}
           {mode === "callput" ? (
             <>
-              <Bar
-                dataKey="callDex"
-                name="Call DEX"
-                fill={POS}
-                radius={[2, 2, 0, 0]}
-                maxBarSize={16}
-              />
-              <Bar
-                dataKey="putDex"
-                name="Put DEX"
-                fill={NEG}
-                radius={[0, 0, 2, 2]}
-                maxBarSize={16}
-              />
-              <Line
-                type="monotone"
-                dataKey="netDex"
-                name="Net DEX"
-                stroke={C_NET}
-                strokeWidth={1.5}
-                strokeDasharray="3 3"
-                dot={false}
-                activeDot={{ r: 3, fill: C_NET }}
-              />
+              <Bar dataKey="callDex" name="Call DEX" fill={POS} radius={[3, 3, 0, 0]} maxBarSize={28} />
+              <Bar dataKey="putDex"  name="Put DEX"  fill={NEG} radius={[0, 0, 3, 3]} maxBarSize={28} />
+              <Line type="monotone" dataKey="netDex" name="Net DEX"
+                stroke={C_NET} strokeWidth={2} strokeDasharray="4 2" dot={false}
+                activeDot={{ r: 4, fill: C_NET, stroke: "#0d1117", strokeWidth: 2 }} />
             </>
           ) : (
-            <Bar dataKey="netDex" name="Net DEX" radius={[2, 2, 2, 2]}>
-              {strikes.map((s, i) => (
-                <Cell key={i} fill={s.netDex >= 0 ? POS : NEG} />
+            <Bar dataKey="netDex" name="Net DEX" radius={[3, 3, 3, 3]} maxBarSize={32}>
+              {data.map((s, i) => (
+                <Cell key={i} fill={s.netDex >= 0 ? POS : NEG} fillOpacity={0.9} />
               ))}
             </Bar>
           )}
         </ComposedChart>
       </ResponsiveContainer>
-
-      {/* ── Bottom legend ──────────────────────────────────────────────── */}
-      <div className="flex items-center justify-center flex-wrap gap-x-5 gap-y-1 mt-1">
-        <BottomLegendItem color={C_CW}   label="Call Wall"   sub="Resistance ceiling" />
-        <BottomLegendItem color={C_PW}   label="Put Wall"    sub="Support floor" />
-        <BottomLegendItem color={C_FLIP} label="Gamma Flip"  sub="Regime pivot" />
-        <BottomLegendItem color={C_SPOT} label="Spot"        sub="Current price" />
-      </div>
     </div>
   );
 }
